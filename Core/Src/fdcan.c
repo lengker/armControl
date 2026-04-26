@@ -27,7 +27,6 @@ extern int8_t READ_FLAG;
 extern uint16_t can_id;
 FDCAN_RxHeaderTypeDef fdcan1_RxHeader;
 FDCAN_TxHeaderTypeDef fdcan1_TxHeader;
-FDCAN_HandleTypeDef hfdcan1;
 
 /* USER CODE END 0 */
 
@@ -79,17 +78,17 @@ void MX_FDCAN1_Init(void)
     {
         Error_Handler();
     }
-  // 2. 开启接收中断通知（对应官方的 ActivateNotification）
-  // if(HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
-  // {
-  //   Error_Handler();
-  // }
+  //2. 开启接收中断通知（对应官方的 ActivateNotification）
+  if(HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
 
-  // 3. 开启 FDCAN 硬件（对应官方的 HAL_CAN_Start）
-  // if(HAL_FDCAN_Start(&hfdcan1) != HAL_OK)
-  // {
-  //   Error_Handler();
-  // }
+  //3. 开启 FDCAN 硬件（对应官方的 HAL_CAN_Start）
+  if(HAL_FDCAN_Start(&hfdcan1) != HAL_OK)
+  {
+    Error_Handler();
+  }
   /* USER CODE END FDCAN1_Init 2 */
 
 }

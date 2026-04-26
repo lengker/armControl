@@ -1,0 +1,408 @@
+#include "motion.h"
+#include "calculate.h"
+#include "DrEmpower_can.h"
+#include "servo.h"
+#include "ruckig_smooth.h"
+#include <math.h>
+#include <stdio.h>
+#include "cmsis_os2.h" // 包含系统延时
+
+/* ========== 全局PID控制器 ========== */
+PID_Controller_t roll_pid = {1.5f, 0.05f, 0.3f, 0, 0};    // Roll稳定增益
+PID_Controller_t pitch_pid = {1.5f, 0.05f, 0.3f, 0, 0};   // Pitch稳定增益
+
+// IMU local switch for motion.c:
+// 0 = disable all IMU-based compensation in this file
+// 1 = enable IMU-based compensation
+#define MOTION_IMU_ENABLE 0
+
+extern float target_x, target_y, target_z;
+volatile uint8_t motion_stream_active = 0;
+
+// 坐标记忆
+float current_arm_x = 235.0f;
+float current_arm_y = 0.0f;
+float current_arm_z = 240.0f; //350-110
+static float current_joint_0 = 0.0f;
+static float current_joint_1 = 90.0f;
+static float current_joint_2 = 0.0f;
+
+/**
+ * @brief 初始化稳定控制系统
+ */
+void Motion_StabilityInit(void)
+{
+    roll_pid.integral_error = 0; // 清空历史积分，防止启动时猛一甩
+    roll_pid.prev_error = 0; // 清空上次误差
+    
+    pitch_pid.integral_error = 0;
+    pitch_pid.prev_error = 0;
+    
+}
+
+
+/**
+ * @brief 计算姿态稳定补偿（核心稳定算法）
+ * @return 补偿结构体，包含所有轴的补偿值
+ * 
+ * 稳定原理（陀螺仪在三臂上）：
+ * - Pitch：直接稳定三臂的俯仰角，应用到关节3（小臂 theta2）
+ * - Roll：稳定底座，补偿机械狗的水平倾斜
+ * 
+ * 这种方法比传统的通过底座+大臂间接补偿更加直观和有效。
+ */
+StabilityCompensation_t Motion_CalcStabilityCompensation(void)
+{
+    StabilityCompensation_t result = {0, 0, 0, 0};  // 初始化为0
+
+    if (!MOTION_IMU_ENABLE || !STABILITY_ENABLED || !imu.valid) {
+        return result;  // 未启用或数据无效，返回零补偿
+    }
+
+#if (IMU_MOUNT_POSITION == IMU_ON_WRIST)
+    // ========== 陀螺仪在三臂上（手腕）- 推荐方案 ==========
+    
+    /* --- Pitch补偿：直接稳定三臂俯仰 --- */
+    // 三臂俯仰角直接测量，应用补偿到theta2
+    float pitch_error = -imu.pitch;  // 负号表示反向补偿
+    
+    if (fabsf(pitch_error) < COMP_DEADZONE) {
+        pitch_error = 0;
+    }
+    
+    // 使用pitch_pid计算PID输出
+    pitch_pid.integral_error += pitch_error;
+    float pitch_comp = pitch_pid.kp * pitch_error + 
+                       pitch_pid.ki * pitch_pid.integral_error + 
+                       pitch_pid.kd * (pitch_error - pitch_pid.prev_error);
+    pitch_pid.prev_error = pitch_error;
+    
+    // 限制幅度（三臂补偿范围较小，±3度比较合理）
+    result.wrist_pitch_comp = (pitch_comp > 3.0f) ? 3.0f : (pitch_comp < -3.0f) ? -3.0f : pitch_comp;
+
+    /* --- Roll补偿：稳定底座 --- */
+    float roll_error = -imu.roll;
+    
+    if (fabsf(roll_error) < COMP_DEADZONE) {
+        roll_error = 0;
+    }
+    
+    roll_pid.integral_error += roll_error;
+    float roll_comp = roll_pid.kp * roll_error + 
+                      roll_pid.ki * roll_pid.integral_error + 
+                      roll_pid.kd * (roll_error - roll_pid.prev_error);
+    roll_pid.prev_error = roll_error;
+    
+    result.roll_comp = (roll_comp > 5.0f) ? 5.0f : (roll_comp < -5.0f) ? -5.0f : roll_comp;
+
+    // 调试输出
+    static uint32_t debug_count = 0;
+    if (++debug_count >= 10) {
+        debug_count = 0;
+        // printf("[Stab-Wrist] Roll=%.2f°(→%.2f°), Pitch(Wrist)=%.2f°(→%.2f°)\r\n",
+        //        imu.roll, result.roll_comp,
+        //        imu.pitch, result.wrist_pitch_comp);
+    }
+
+#else
+    // ========== 其他位置（保留，暂不使用） ==========
+    // 这里保留了原来的底座+大臂补偿逻辑，以备后用
+    
+    float roll_error = -imu.roll;
+    if (fabsf(roll_error) < COMP_DEADZONE) {
+        roll_error = 0;
+    }
+    
+    roll_pid.integral_error += roll_error;
+    float roll_comp = roll_pid.kp * roll_error + 
+                      roll_pid.ki * roll_pid.integral_error + 
+                      roll_pid.kd * (roll_error - roll_pid.prev_error);
+    roll_pid.prev_error = roll_error;
+    result.roll_comp = (roll_comp > 5.0f) ? 5.0f : (roll_comp < -5.0f) ? -5.0f : roll_comp;
+
+    float pitch_error = -imu.pitch;
+    if (fabsf(pitch_error) < COMP_DEADZONE) {
+        pitch_error = 0;
+    }
+    
+    pitch_pid.integral_error += pitch_error;
+    float pitch_comp = pitch_pid.kp * pitch_error + 
+                       pitch_pid.ki * pitch_pid.integral_error + 
+                       pitch_pid.kd * (pitch_error - pitch_pid.prev_error);
+    pitch_pid.prev_error = pitch_error;
+    result.pitch_comp = (pitch_comp > 5.0f) ? 5.0f : (pitch_comp < -5.0f) ? -5.0f : pitch_comp;
+
+#endif
+
+    return result;
+}
+
+
+void Motion_SetHome(void) {
+    // 初始状态：底座0，大臂90(垂直)，小臂0(水平)
+    // 速度 10, 加速度 5
+    set_angle(ID_BASE,  0.0f,  10.0f, 5.0f, 1);
+    set_angle(ID_BIG,   90.0f, 10.0f, 5.0f, 1);
+    set_angle(ID_SMALL, 0.0f,  10.0f, 5.0f, 1);
+    current_joint_0 = 0.0f;
+    current_joint_1 = 90.0f;
+    current_joint_2 = 0.0f;
+
+    // 末端用机械结构固定垂直向下，无需舵机控制
+}
+
+int Motion_MoveToXYZ(float x, float y, float z, float pitch) {
+    JointAngles_t ik_result;
+
+#if MOTION_USE_RUCKIG_SMOOTH
+    // Ruckig 模式：统一走关节平滑轨迹（内部已包含 IK、限位检查和连续下发）
+    return Motion_MoveToXYZ_RuckigSmooth(x, y, z, pitch, 0.0f);
+#else
+    // 末端通过机械连杆保持垂直向下，pitch 通常固定为 -90.0f。
+    // 这一步仍然使用逆运动学计算完整关节角度。
+    if (inverse_kinematics(x, y, z, pitch, &ik_result) == 0) {
+        
+        // 应用关节角度限位保护
+        //ik_result = optimize_and_limit_angles(ik_result, 0.0f);  // current_theta0暂时传0
+        
+#if STABILITY_ENABLED
+        // ========== 启用稳定补偿 ==========
+        StabilityCompensation_t stability = Motion_CalcStabilityCompensation();
+        
+#if (IMU_MOUNT_POSITION == IMU_ON_WRIST)
+        // ===== 陀螺仪在三臂（手腕）上 =====
+        // 直接应用Pitch补偿到theta2（三臂/小臂角度）
+        float theta2_comp = ik_result.theta2 + stability.wrist_pitch_comp;
+        
+        // 底座补偿
+        float theta0_comp = ik_result.theta0 + stability.roll_comp * 0.8f;
+        
+        // 控制大然电机（带补偿）
+        set_angle(ID_BASE,  theta0_comp, 30.0f, 20.0f, 1);
+        set_angle(ID_BIG,   ik_result.theta1, 30.0f, 20.0f, 1);  // 大臂不补偿（陀螺仪不测量）
+        // 机械结构要求小臂稍后启动时，应该在状态机层面处理，而不是在通用运动函数里直接阻塞。
+        set_angle(ID_SMALL, theta2_comp, 30.0f, 20.0f, 1);       // 小臂/三臂补偿
+
+#else
+        // ===== 其他陀螺仪位置（保留） =====
+        float theta0_comp = ik_result.theta0 + stability.roll_comp * 0.8f;
+        float theta1_comp = ik_result.theta1 + stability.pitch_comp * 0.6f;
+        
+        set_angle(ID_BASE,  theta0_comp, 50.0f, 40.0f, 1);
+        set_angle(ID_BIG,   theta1_comp, 50.0f, 40.0f, 1);
+        set_angle(ID_SMALL, ik_result.theta2, 50.0f, 40.0f, 1);
+#endif
+
+#else
+        // ========== 禁用稳定补偿 ==========
+        // 控制大然电机（无补偿）
+        set_angle(ID_BASE,  ik_result.theta0, 50.0f, 40.0f, 1);
+        set_angle(ID_BIG,   ik_result.theta1, 50.0f, 40.0f, 1);
+        set_angle(ID_SMALL, ik_result.theta2, 50.0f, 40.0f, 1);
+#endif
+        return 0;
+    }
+    //return -1; // 解算失败
+    return 0;
+#endif
+}
+
+int Motion_MoveToXYZ_BaseBig(float x, float y, float z, float pitch)
+{
+    JointAngles_t ik_result;
+    if (inverse_kinematics(x, y, z, pitch, &ik_result) != 0) {
+        return -1;
+    }
+
+    StabilityCompensation_t stability = Motion_CalcStabilityCompensation();
+    float theta0_comp = ik_result.theta0 + stability.roll_comp * 0.8f;
+
+    set_angle(ID_BASE, theta0_comp, 30.0f, 20.0f, 1);
+    set_angle(ID_BIG,  ik_result.theta1, 30.0f, 20.0f, 1);
+
+    return 0;
+}
+
+int Motion_MoveToXYZ_SmallArm(float x, float y, float z, float pitch)
+{
+    JointAngles_t ik_result;
+    if (inverse_kinematics(x, y, z, pitch, &ik_result) != 0) {
+        return -1;
+    }
+
+    StabilityCompensation_t stability = Motion_CalcStabilityCompensation();
+    float theta2_comp = ik_result.theta2 + stability.wrist_pitch_comp;
+
+    set_angle(ID_SMALL, theta2_comp, 30.0f, 20.0f, 1);
+
+    // 【新增】：下发控制指令成功后，更新当前记忆坐标
+    current_arm_x = x;
+    current_arm_y = y;
+    current_arm_z = z;
+
+    return 0;
+}
+
+//--------------------------------------------------------------
+
+/**
+ * @brief 笛卡尔空间 + 五次多项式平滑移动 (直线轨迹，S型速度)
+ * @param end_x, end_y, end_z 目标 XYZ 坐标 (mm)
+ * @param duration_s          期望到达的时间 (秒)
+ */
+int Motion_MoveStraightSmooth(float end_x, float end_y, float end_z, float duration_s)
+{
+    // 1. 获取当前机械臂物理起点
+    float start_x = current_arm_x;
+    float start_y = current_arm_y;
+    float start_z = current_arm_z;
+
+    // 2. 设定控制周期 (20ms = 50Hz刷新率，足够丝滑)
+    const uint32_t step_ms = 20;
+    int total_steps = (int)(duration_s * 1000.0f / step_ms);
+    if(total_steps < 1) total_steps = 1;
+
+    // 3. 开始插补循环
+    for(int i = 1; i <= total_steps; i++) {
+        float tau = (float)i / (float)total_steps;
+
+        // 五次多项式速度曲线 s(tau) = 10*tau^3 - 15*tau^4 + 6*tau^5
+        float tau3 = tau * tau * tau;
+        float tau4 = tau3 * tau;
+        float tau5 = tau4 * tau;
+        float s = 10.0f * tau3 - 15.0f * tau4 + 6.0f * tau5;
+
+        // 计算当前瞬间的目标坐标点
+        float cur_x = start_x + (end_x - start_x) * s;
+        float cur_y = start_y + (end_y - start_y) * s;
+        float cur_z = start_z + (end_z - start_z) * s;
+
+        JointAngles_t ik_result;
+        if (inverse_kinematics(cur_x, cur_y, cur_z, -90.0f, &ik_result) == 0) {
+
+            // 极限解除大然电机内部缓冲，把速度设为极大值 300，让电机服从我们的细分位置下发
+            #if STABILITY_ENABLED
+                StabilityCompensation_t stability = Motion_CalcStabilityCompensation();
+                #if (IMU_MOUNT_POSITION == IMU_ON_WRIST)
+                    float theta2_comp = ik_result.theta2 + stability.wrist_pitch_comp;
+                    float theta0_comp = ik_result.theta0 + stability.roll_comp * 0.8f;
+                    set_angle(ID_BASE,  theta0_comp,   30.0f, 30.0f, 1);
+                    set_angle(ID_BIG,   ik_result.theta1, 30.0f, 30.0f, 1);
+                    set_angle(ID_SMALL, theta2_comp,   30.0f, 30.0f, 1);
+                #endif
+            #else
+                set_angle(ID_BASE,  ik_result.theta0, 300.0f, 300.0f, 1);
+                set_angle(ID_BIG,   ik_result.theta1, 300.0f, 300.0f, 1);
+                set_angle(ID_SMALL, ik_result.theta2, 300.0f, 300.0f, 1);
+            #endif
+
+            // 更新记忆坐标
+            current_arm_x = cur_x;
+            current_arm_y = cur_y;
+            current_arm_z = cur_z;
+
+        } else {
+            return -1; // 运动学无解或超限，立刻中断
+        }
+
+        // 关键：把控制权交还给 FreeRTOS 系统，延时 20ms 等待电机转到位
+        osDelay(step_ms);
+    }
+
+    return 0;
+}
+
+// ---------------- Ruckig smooth joint motion ----------------
+
+static float clampf_local(float v, float lo, float hi) {
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
+
+int Motion_MoveToXYZ_RuckigSmooth(float x, float y, float z, float pitch, float duration_hint_s) {
+    (void)duration_hint_s; // 目前不强制 duration（Ruckig 会给时间最优 jerk-limited 轨迹）
+    const float z_cmd = z + MOTION_Z_CALIB_BIAS_MM;
+
+    JointAngles_t ik_result;
+    if (inverse_kinematics(x, y, z_cmd, pitch, &ik_result) != 0) {
+        printf("[Ruckig] IK failed\r\n");
+        return -11; // IK 无解
+    }
+
+    // 目标角（含稳定补偿，只对目标做一次补偿；如果需要“实时稳定”，应在上层闭环里做）
+    float qT[3] = {ik_result.theta0, ik_result.theta1, ik_result.theta2};
+
+#if STABILITY_ENABLED
+    StabilityCompensation_t stability = Motion_CalcStabilityCompensation();
+#if (IMU_MOUNT_POSITION == IMU_ON_WRIST)
+    qT[0] = qT[0] + stability.roll_comp * 0.8f;
+    qT[2] = qT[2] + stability.wrist_pitch_comp;
+#else
+    qT[0] = qT[0] + stability.roll_comp * 0.8f;
+    qT[1] = qT[1] + stability.pitch_comp * 0.6f;
+#endif
+#endif
+
+    // 当前关节角（使用软件记忆值，避免总线回读阻塞）
+    float q0[3] = {current_joint_0, current_joint_1, current_joint_2};
+
+    // 用户要求移除限位约束：这里不做关节角夹紧与越限拦截。
+
+    // 50Hz 下发（和 Motion_MoveStraightSmooth 一致）
+    const uint32_t step_ms = 20;
+    const float dt_s = 0.02f;
+
+    RuckigSmooth_Init(dt_s);
+    const int start_ret = RuckigSmooth_Start(q0, qT);
+    if (start_ret != 0) {
+        printf("[Ruckig] start failed ret=%d q0=(%.2f, %.2f, %.2f) qT=(%.2f, %.2f, %.2f)\r\n",
+               start_ret, q0[0], q0[1], q0[2], qT[0], qT[1], qT[2]);
+        return (-200 + start_ret); // -21x / -22x 保留底层错误码
+    }
+
+    float q_cmd[3] = {q0[0], q0[1], q0[2]};
+
+    // mode=0：轨迹跟踪模式。param=滤波带宽（建议=指令频率一半），50Hz -> 25
+    const float tracking_bandwidth = 25.0f;
+    uint32_t loop_count = 0;
+    const uint32_t max_loop_count = 500; // 500 * 20ms = 10s timeout
+
+    motion_stream_active = 1;
+    while (1) {
+        const int st = RuckigSmooth_Step(q_cmd);
+
+        set_angle(ID_BASE, q_cmd[0], 0.0f, tracking_bandwidth, 0);
+        osDelay(1);
+        set_angle(ID_BIG, q_cmd[1], 0.0f, tracking_bandwidth, 0);
+        osDelay(1);
+        set_angle(ID_SMALL, q_cmd[2], 0.0f, tracking_bandwidth, 0);
+
+        if (st == 1) {
+            break;
+        }
+        if (st < 0) {
+            printf("[Ruckig] step failed st=%d loop=%lu\r\n", st, (unsigned long)loop_count);
+            motion_stream_active = 0;
+            return (-300 + st); // -32x 保留底层错误码
+        }
+        if (++loop_count >= max_loop_count) {
+            printf("[Ruckig] timeout loop=%lu\r\n", (unsigned long)loop_count);
+            motion_stream_active = 0;
+            return -401; // 超时保护，避免卡死
+        }
+
+        osDelay(step_ms);
+    }
+
+    // 更新记忆坐标（到达目标后更新）
+    current_arm_x = x;
+    current_arm_y = y;
+    current_arm_z = z;
+    current_joint_0 = qT[0];
+    current_joint_1 = qT[1];
+    current_joint_2 = qT[2];
+    motion_stream_active = 0;
+
+    return 0;
+}

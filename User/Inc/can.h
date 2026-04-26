@@ -3,6 +3,7 @@
 
 #include "fdcan.h"
 #include "stdio.h"  // 用于调试打印
+#include "dm_imu.h" // 陀螺仪CAN驱动
 
 
 

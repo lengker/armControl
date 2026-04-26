@@ -23,6 +23,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 /* USER CODE END Includes */
+#include <stdio.h>
+/* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN TD */
@@ -89,7 +91,11 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
-
+  printf("[FAULT] HardFault! CFSR=0x%08lX HFSR=0x%08lX MMFAR=0x%08lX BFAR=0x%08lX\r\n",
+         (unsigned long)SCB->CFSR,
+         (unsigned long)SCB->HFSR,
+         (unsigned long)SCB->MMFAR,
+         (unsigned long)SCB->BFAR);
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {

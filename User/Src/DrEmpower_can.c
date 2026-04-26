@@ -547,12 +547,16 @@ void set_angles(uint8_t *id_list, float *angle_list, float speed, float param, i
     static float *current_angle_list = NULL;
 
     uint8_t state = 0;
-    for (size_t i = 0; i < n; i++)
-    {
-        if (last_id_list[i] != id_list[i])
+    if (last_id_list == NULL || current_angle_list == NULL) {
+        state = 1;
+    } else {
+        for (size_t i = 0; i < n; i++)
         {
-            state = 1;
-            break;
+            if (last_id_list[i] != id_list[i])
+            {
+                state = 1;
+                break;
+            }
         }
     }
 
@@ -563,6 +567,9 @@ void set_angles(uint8_t *id_list, float *angle_list, float speed, float param, i
         SERVO_FREE(current_angle_list);
         last_id_list = SERVO_MALLOC(n * sizeof(uint8_t));
         current_angle_list = SERVO_MALLOC(n * sizeof(float));
+#if ENABLE_INPUT_VALIDITY_CHECK
+        if (last_id_list == NULL || current_angle_list == NULL) return;
+#endif
         memcpy(last_id_list, id_list, n * sizeof(uint8_t));
         for (size_t i = 0; i < n; i++)
             current_angle_list[i] = get_state(id_list[i]).angle;

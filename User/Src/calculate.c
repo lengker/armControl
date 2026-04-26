@@ -11,11 +11,9 @@
 #define DEBUG_KINEMATICS 1
 /* 机械臂几何参数 (单位: cm) */
 // 原点在大臂转轴中心处
-#define ARM_L1      35.00f   // 大臂长度
-#define ARM_L2      23.55f   // 小臂长度
-//#define ARM_L3      8.836f   // 三臂长度，有点问题
-#define ARM_L3      10.00f   // 三臂长度
-
+#define ARM_L1      350.00f  // 大臂长度 (mm)
+#define ARM_L2      235.50f  // 小臂长度 (mm)
+#define ARM_L3      110.00f  // 三臂长度 (mm)
 
 /* 数学常数 */
 #ifndef M_PI
@@ -175,7 +173,6 @@ int inverse_kinematics(float x, float y, float z, float target_absolute_pitch, J
     // 大臂：定义一致 (90=垂直)
     angles->theta1 = A1;
     angles->theta2 = angles->theta1 - A2 - 90.0f;
-    angles->theta3 = target_absolute_pitch - A2;
 
     return 0;
 }
@@ -186,18 +183,41 @@ int inverse_kinematics(float x, float y, float z, float target_absolute_pitch, J
  */
 JointAngles_t optimize_and_limit_angles(JointAngles_t target_input, float current_theta0)
 {
-    // JointAngles_t safe_angles;
+    //  JointAngles_t safe_angles;
+    // // 限位前后的对比输出
+    // //printf("[限位前] Th0=%.1f, Th1=%.1f, Th2=%.1f\r\n",target_input.theta0, target_input.theta1, target_input.theta2);
+    //  /* 1. 关节0：最短路径优化 */
+    //  // 自动选择顺时针或逆时针旋转
+    //  safe_angles.theta0 = find_shortest_path(target_input.theta0, current_theta0);
     //
-    // /* 1. 关节0：最短路径优化 */
-    // // 自动选择顺时针或逆时针旋转
-    // safe_angles.theta0 = find_shortest_path(target_input.theta0, current_theta0);
+    //  /* 2. 关节0~2：安全范围限制 (Clamping) */
+    //  // 强制将角度限制在机械结构允许的范围内
+    //  safe_angles.theta0 = clamp_float(safe_angles.theta0, J0_MIN, J0_MAX);
+    //  safe_angles.theta1 = clamp_float(target_input.theta1, J1_MIN, J1_MAX);
+    //  safe_angles.theta2 = clamp_float(target_input.theta2, J2_MIN, J2_MAX);
     //
-    // /* 2. 关节1~3：安全范围限制 (Clamping) */
-    // // 强制将角度限制在机械结构允许的范围内
-    // safe_angles.theta1 = clamp_float(target_input.theta1, J1_MIN, J1_MAX);
-    // safe_angles.theta2 = clamp_float(target_input.theta2, J2_MIN, J2_MAX);
-    // safe_angles.theta3 = clamp_float(target_input.theta3, J3_MIN, J3_MAX);
+    //  /* 3. 大臂和小臂夹角限制 */
+    //  // 夹角 A2 = theta1 - theta2 - 90.0f (从逆运动学推导)
+    //  float arm_angle = safe_angles.theta1 - safe_angles.theta2 - 90.0f;
+    //  //printf("[夹角检查] 当前夹角=%.1f° (范围: %.1f°~%.1f°)\r\n", arm_angle, ARM_ANGLE_MIN, ARM_ANGLE_MAX);
     //
+    //  if (arm_angle < ARM_ANGLE_MIN) {
+    //      // 夹角太小，减小 theta2 来增大夹角 (因为 A2 = theta1 - theta2 - 90)
+    //      float delta = ARM_ANGLE_MIN - arm_angle;
+    //      safe_angles.theta2 -= delta;
+    //      //printf("[夹角限位] 夹角过小，调整theta2: %.1f -> %.1f\r\n", target_input.theta2, safe_angles.theta2);
+    //  }
+    //  else if (arm_angle > ARM_ANGLE_MAX) {
+    //      // 夹角太大，增大 theta2 来减小夹角
+    //      float delta = arm_angle - ARM_ANGLE_MAX;
+    //      safe_angles.theta2 += delta;
+    //      //printf("[夹角限位] 夹角过大，调整theta2: %.1f -> %.1f\r\n", target_input.theta2, safe_angles.theta2);
+    //  }
+    //
+    //  // 再次确保 theta2 在其机械范围内
+    //  safe_angles.theta2 = clamp_float(safe_angles.theta2, J2_MIN, J2_MAX);
+    // //printf("[限位后] Th0=%.1f, Th1=%.1f, Th2=%.1f\r\n",safe_angles.theta0, safe_angles.theta1, safe_angles.theta2);
     // return safe_angles;
     return target_input;
 }
+

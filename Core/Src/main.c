@@ -29,6 +29,11 @@
 #include "DrEmpower_can.h"
 #include <stdio.h>
 #include "calculate.h"
+#include "motion.h"
+#include "dm_imu.h"
+#include "myuart.h"
+#include "pump.h"
+//#include "imu_can.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -99,9 +104,29 @@ int main(void)
   MX_FDCAN2_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+  My_UART_Init(); // 启动UART中断接收
+  // 2. 强制发送“切换为被动模式”指令 (寄存器 0x0B, 数据 0 代表被动/应答)
+  imu_write_reg(0x0B, 0);
+  HAL_Delay(100);
+
+  // 3. 强制发送“保存参数”指令 (防止掉电重启后又变回主动模式)
+  imu_save_parameters();
+  HAL_Delay(500);
   // 开启舵机 PWM 输出
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1); //改用tim1的ch1
   printf("\r\n=== 系统启动: 等待 FreeRTOS 接管 ===\r\n");
+
+  // 初始化陀螺仪CAN通信 (模块CAN_ID=0x06, 接收主机MST_ID=0x11, 绑定hfdcan1)
+  imu_init(0x06, 0x11, &hfdcan1);
+  printf("[Main] IMU CAN initialized. Listening on ID 0x%03X\r\n", 0x06);
+  
+  // 初始化气泵控制
+  Pump_Init();
+  printf("[Main] Pump initialized\r\n");
+  
+  // 初始化运动控制和稳定系统
+  Motion_StabilityInit();
+  printf("[Main] Motion stability control initialized\r\n");
 
   /* USER CODE END 2 */
 

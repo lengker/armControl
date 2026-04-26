@@ -28,11 +28,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 project(${CMAKE_PROJECT_NAME})
 message("Build type: " ${CMAKE_BUILD_TYPE})
 
-# Enable CMake support for ASM and C languages
-enable_language(C ASM)
+# Enable CMake support for ASM, C and C++ languages
+enable_language(C ASM CXX)
 
 # Create an executable object type
-add_executable(${CMAKE_PROJECT_NAME})
+add_executable(${CMAKE_PROJECT_NAME}
+        Core/Src/app.c)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
@@ -51,6 +52,11 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
         User/Src/servo.c
         User/Src/myuart.c
         User/Src/cmd.c
+        User/Src/pump.c
+        User/Src/motion.c
+        User/Src/dm_imu.c
+        User/Src/ruckig_smooth.cpp
+        Core/Src/freertos_hooks.c
 )
 
 # Add include paths
@@ -58,6 +64,23 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
         User/Inc
 )
+
+# ---- Ruckig (jerk-limited trajectory generation) ----
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_BENCHMARK OFF CACHE BOOL "" FORCE)
+set(BUILD_CLOUD_CLIENT OFF CACHE BOOL "" FORCE)
+set(BUILD_PYTHON_MODULE OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/ruckig ${CMAKE_CURRENT_BINARY_DIR}/ruckig)
+target_link_libraries(${CMAKE_PROJECT_NAME} ruckig)
+
+# Ruckig is compute-heavy; in Debug builds (-O0) it may appear to hang on MCU.
+# Force optimization for the ruckig library even when the main firmware is Debug.
+if(TARGET ruckig)
+    target_compile_options(ruckig PRIVATE -O3)
+endif()
 
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
