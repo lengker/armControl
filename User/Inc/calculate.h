@@ -23,13 +23,13 @@ typedef struct {
 #define J1_MIN  0.0f
 #define J1_MAX  120.0f
 // 关节2：小臂角度 (直接角度限制)
-#define J2_MIN  -20.0f
+#define J2_MIN  0.0f
 #define J2_MAX  120.0f
 
 /* --- 大臂和小臂夹角范围定义 --- */
-// 夹角 = theta1 - theta2
-#define ARM_ANGLE_MIN  30.0f   // 最小夹角 (避免碰撞)
-#define ARM_ANGLE_MAX  150.0f  // 最大夹角 (避免过度伸展)
+// 内角 = 180° - |theta2 - theta1|
+#define ARM_ANGLE_MIN  30.0f   // 最小内角 (避免过度折叠)
+#define ARM_ANGLE_MAX  150.0f  // 最大内角 (避免过度伸展)
 
 void forward_kinematics(float theta0, float theta1, float theta2, float theta3,
                         float L1, float L2, float L3,

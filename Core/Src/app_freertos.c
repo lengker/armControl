@@ -25,13 +25,11 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "calculate.h"
-#include "stdio.h"
-#include "DrEmpower_can.h"
-#include "fdcan.h"
+#include "types.h"
+#include "logger.h"
+#include "config.h"
+#include "state_machine.h"
 #include "myuart.h"
-#include "cmd.h"
-#include "can.h"
 #include "motion.h"
 #include "pump.h"
 #include "app.h"
@@ -43,12 +41,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-// 定义测试点结构体
-// 引入全局坐标变量（它们在 myuart.c 中更新）
-extern float target_x;
-extern float target_y;
-extern float target_z;
+#define TAG "FreeRTOS"
 
+extern SystemContext_t g_system;
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -169,20 +164,23 @@ extern osMessageQueueId_t AngleQueueHandle; /* 声明外部队列句柄 */
   * @retval None
   */
 /* USER CODE END Header_StartCalculationTask */
+/**
+ * @brief  CalculationTask任务入口函数
+ * @param  argument: 未使用
+ * @retval None
+ * @note   负责跟随模式下的实时运动控制
+ */
 void StartCalculationTask(void *argument)
 {
   /* USER CODE BEGIN StartCalculationTask */
-  printf("--- CalculationTask初始化 ---\r\n");
-  osDelay(1000); // 给电机一点时间上电
-  // 2. 初始化泵和机械臂
-  Pump_Init();
-  //Motion_SetHome();
-  osDelay(2000);
+  // 等待系统初始化完成（由 PickAndPlace 任务负责）
+  osDelay(4000);
+  
+  LOG_I(TAG, "CalculationTask started");
 
   /* Infinite loop */
   for(;;)
   {
-    //printf("进入 ---\r\n");
     CalculationTask_Run();
   }
   /* USER CODE END StartCalculationTask */
@@ -195,9 +193,48 @@ void StartCalculationTask(void *argument)
 * @retval None
 */
 /* USER CODE END Header_StartPickAndPlace */
+/**
+ * @brief  PickAndPlace任务入口函数
+ * @param  argument: 未使用
+ * @retval None
+ * @note   负责系统初始化和自动抓取流程
+ */
 void StartPickAndPlace(void *argument)
 {
   /* USER CODE BEGIN StartPickAndPlace */
+  LOG_I(TAG, "=== System Initializing ===");
+  
+  // 【安全】立即强制关闭气泵
+  Pump_Off();
+  osDelay(100);
+  
+  // 【安全】强制复位全局状态
+  g_system.status.pump_on = false;
+  g_system.status.emergency_stop = false;
+  g_system.sm.current_state = STATE_IDLE;
+  g_system.sm.prev_state = STATE_IDLE;
+  g_system.sm.retry_count = 0;
+  
+  osDelay(SYSTEM_INIT_DELAY_MS); // 等待电机上电稳定
+  
+  // 初始化外设
+  Pump_Init();
+  My_UART_Init();
+  
+  // 初始化状态机
+  StateMachine_Init();
+  
+  // 机械臂回零
+  LOG_I(TAG, "Moving to home position...");
+  Motion_SetHome();
+  
+  osDelay(MOTOR_READY_DELAY_MS); // 等待回零完成
+  
+  LOG_I(TAG, "=== System Ready ===");
+  LOG_I(TAG, "Work mode: %s", 
+        g_system.work_mode == WORK_MODE_AUTO ? "AUTO" : 
+        g_system.work_mode == WORK_MODE_TEST ? "TEST" : "FOLLOW");
+  
   /* Infinite loop */
   for(;;)
   {
@@ -213,9 +250,17 @@ void StartPickAndPlace(void *argument)
 * @retval None
 */
 /* USER CODE END Header_StartImuTask */
+/**
+ * @brief  ImuTask任务入口函数
+ * @param  argument: 未使用
+ * @retval None
+ * @note   负责IMU数据采集和姿态稳定
+ */
 void StartImuTask(void *argument)
 {
   /* USER CODE BEGIN StartImuTask */
+  LOG_I(TAG, "ImuTask started");
+  
   /* Infinite loop */
   for(;;)
   {

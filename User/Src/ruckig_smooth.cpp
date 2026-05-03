@@ -22,9 +22,9 @@ struct AxisRuckigState {
 std::array<AxisRuckigState, DOFs> g_axes;
 bool g_active = false;
 
-constexpr double V_MAX[DOFs] = {120.0, 120.0, 160.0};      // deg/s
-constexpr double A_MAX[DOFs] = {600.0, 600.0, 800.0};      // deg/s^2
-constexpr double J_MAX[DOFs] = {6000.0, 6000.0, 8000.0};   // deg/s^3
+constexpr double V_MAX[DOFs] = {30.0, 30.0, 40.0};      // deg/s (降低速度以便观察)
+constexpr double A_MAX[DOFs] = {150.0, 150.0, 200.0};      // deg/s^2 (降低加速度)
+constexpr double J_MAX[DOFs] = {1500.0, 1500.0, 2000.0};   // deg/s^3 (降低加加速度)
 
 }  // namespace
 

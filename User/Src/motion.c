@@ -6,6 +6,7 @@
 #include <math.h>
 #include <stdio.h>
 #include "cmsis_os2.h" // 包含系统延时
+#include "logger.h"
 
 /* ========== 全局PID控制器 ========== */
 PID_Controller_t roll_pid = {1.5f, 0.05f, 0.3f, 0, 0};    // Roll稳定增益
@@ -143,7 +144,7 @@ void Motion_SetHome(void) {
     // 速度 10, 加速度 5
     set_angle(ID_BASE,  0.0f,  10.0f, 5.0f, 1);
     set_angle(ID_BIG,   90.0f, 10.0f, 5.0f, 1);
-    set_angle(ID_SMALL, 0.0f,  10.0f, 5.0f, 1);
+    set_angle(ID_SMALL, -0.0f,  10.0f, 5.0f, 1);  // 注意：电机3角度取反
     current_joint_0 = 0.0f;
     current_joint_1 = 90.0f;
     current_joint_2 = 0.0f;
@@ -162,8 +163,8 @@ int Motion_MoveToXYZ(float x, float y, float z, float pitch) {
     // 这一步仍然使用逆运动学计算完整关节角度。
     if (inverse_kinematics(x, y, z, pitch, &ik_result) == 0) {
         
-        // 应用关节角度限位保护
-        //ik_result = optimize_and_limit_angles(ik_result, 0.0f);  // current_theta0暂时传0
+        // 应用关节角度限位保护（防止机械臂过度伸展或负角度）
+        ik_result = optimize_and_limit_angles(ik_result, 0.0f);  // current_theta0暂时传0
         
 #if STABILITY_ENABLED
         // ========== 启用稳定补偿 ==========
@@ -181,7 +182,7 @@ int Motion_MoveToXYZ(float x, float y, float z, float pitch) {
         set_angle(ID_BASE,  theta0_comp, 30.0f, 20.0f, 1);
         set_angle(ID_BIG,   ik_result.theta1, 30.0f, 20.0f, 1);  // 大臂不补偿（陀螺仪不测量）
         // 机械结构要求小臂稍后启动时，应该在状态机层面处理，而不是在通用运动函数里直接阻塞。
-        set_angle(ID_SMALL, theta2_comp, 30.0f, 20.0f, 1);       // 小臂/三臂补偿
+        set_angle(ID_SMALL, -theta2_comp, 30.0f, 20.0f, 1);       // 小臂/三臂补偿（注意：电机3角度取反）
 
 #else
         // ===== 其他陀螺仪位置（保留） =====
@@ -190,7 +191,7 @@ int Motion_MoveToXYZ(float x, float y, float z, float pitch) {
         
         set_angle(ID_BASE,  theta0_comp, 50.0f, 40.0f, 1);
         set_angle(ID_BIG,   theta1_comp, 50.0f, 40.0f, 1);
-        set_angle(ID_SMALL, ik_result.theta2, 50.0f, 40.0f, 1);
+        set_angle(ID_SMALL, -ik_result.theta2, 50.0f, 40.0f, 1);  // 注意：电机3角度取反
 #endif
 
 #else
@@ -198,7 +199,7 @@ int Motion_MoveToXYZ(float x, float y, float z, float pitch) {
         // 控制大然电机（无补偿）
         set_angle(ID_BASE,  ik_result.theta0, 50.0f, 40.0f, 1);
         set_angle(ID_BIG,   ik_result.theta1, 50.0f, 40.0f, 1);
-        set_angle(ID_SMALL, ik_result.theta2, 50.0f, 40.0f, 1);
+        set_angle(ID_SMALL, -ik_result.theta2, 50.0f, 40.0f, 1);  // 注意：电机3角度取反
 #endif
         return 0;
     }
@@ -233,7 +234,7 @@ int Motion_MoveToXYZ_SmallArm(float x, float y, float z, float pitch)
     StabilityCompensation_t stability = Motion_CalcStabilityCompensation();
     float theta2_comp = ik_result.theta2 + stability.wrist_pitch_comp;
 
-    set_angle(ID_SMALL, theta2_comp, 30.0f, 20.0f, 1);
+    set_angle(ID_SMALL, -theta2_comp, 30.0f, 20.0f, 1);  // 注意：电机3角度取反
 
     // 【新增】：下发控制指令成功后，更新当前记忆坐标
     current_arm_x = x;
@@ -288,12 +289,12 @@ int Motion_MoveStraightSmooth(float end_x, float end_y, float end_z, float durat
                     float theta0_comp = ik_result.theta0 + stability.roll_comp * 0.8f;
                     set_angle(ID_BASE,  theta0_comp,   30.0f, 30.0f, 1);
                     set_angle(ID_BIG,   ik_result.theta1, 30.0f, 30.0f, 1);
-                    set_angle(ID_SMALL, theta2_comp,   30.0f, 30.0f, 1);
+                    set_angle(ID_SMALL, -theta2_comp,   30.0f, 30.0f, 1);  // 注意：电机3角度取反
                 #endif
             #else
                 set_angle(ID_BASE,  ik_result.theta0, 300.0f, 300.0f, 1);
                 set_angle(ID_BIG,   ik_result.theta1, 300.0f, 300.0f, 1);
-                set_angle(ID_SMALL, ik_result.theta2, 300.0f, 300.0f, 1);
+                set_angle(ID_SMALL, -ik_result.theta2, 300.0f, 300.0f, 1);  // 注意：电机3角度取反
             #endif
 
             // 更新记忆坐标
@@ -330,8 +331,12 @@ int Motion_MoveToXYZ_RuckigSmooth(float x, float y, float z, float pitch, float 
         return -11; // IK 无解
     }
 
-    // 目标角（含稳定补偿，只对目标做一次补偿；如果需要“实时稳定”，应在上层闭环里做）
+    // 【关键】应用关节角度限位保护
+    ik_result = optimize_and_limit_angles(ik_result, current_joint_0);
+
+    // 目标角（含稳定补偿，只对目标做一次补偿；如果需要"实时稳定"，应在上层闭环里做）
     float qT[3] = {ik_result.theta0, ik_result.theta1, ik_result.theta2};
+
 
 #if STABILITY_ENABLED
     StabilityCompensation_t stability = Motion_CalcStabilityCompensation();
@@ -366,7 +371,17 @@ int Motion_MoveToXYZ_RuckigSmooth(float x, float y, float z, float pitch, float 
     // mode=0：轨迹跟踪模式。param=滤波带宽（建议=指令频率一半），50Hz -> 25
     const float tracking_bandwidth = 25.0f;
     uint32_t loop_count = 0;
-    const uint32_t max_loop_count = 500; // 500 * 20ms = 10s timeout
+    const uint32_t max_loop_count = 1000; // 1000 * 20ms = 20s timeout（增加以适应慢速运动）
+    
+    // 【调试模式】实时打印运动过程
+    uint32_t last_print_time = osKernelGetTickCount();
+    const uint32_t print_interval_ms = 1000;  // 每1秒打印一次
+    
+    printf("\r\n========== 开始运动 ==========\r\n");
+    printf("目标: X=%.1f, Y=%.1f, Z=%.1f\r\n", x, y, z);
+    printf("目标角度: Th0=%.1f°, Th1=%.1f°, Th2=%.1f°\r\n", qT[0], qT[1], qT[2]);
+    printf("起始角度: Th0=%.1f°, Th1=%.1f°, Th2=%.1f°\r\n", q0[0], q0[1], q0[2]);
+    printf("=============================\r\n");
 
     motion_stream_active = 1;
     while (1) {
@@ -376,9 +391,43 @@ int Motion_MoveToXYZ_RuckigSmooth(float x, float y, float z, float pitch, float 
         osDelay(1);
         set_angle(ID_BIG, q_cmd[1], 0.0f, tracking_bandwidth, 0);
         osDelay(1);
-        set_angle(ID_SMALL, q_cmd[2], 0.0f, tracking_bandwidth, 0);
+        set_angle(ID_SMALL, -q_cmd[2], 0.0f, tracking_bandwidth, 0);  // 注意：电机3角度取反
+        
+        // 【调试模式】每1秒打印当前状态
+        uint32_t current_time = osKernelGetTickCount();
+        if (current_time - last_print_time >= print_interval_ms) {
+            last_print_time = current_time;
+            
+            // 计算当前末端位置（FK正解）
+            float current_x, current_y, current_z;
+            forward_kinematics_default(q_cmd[0], q_cmd[1], q_cmd[2], 0, 
+                                      &current_x, &current_y, &current_z);
+            
+            // 计算大小臂夹角
+            float angle_diff = fabsf(q_cmd[2] - q_cmd[1]);
+            float arm_angle_inner = 180.0f - angle_diff;
+            
+            printf("[%.1fs] 电机角: Th0=%.1f° Th1=%.1f° Th2=%.1f° | 大臂角=%.1f° 小臂角=%.1f° 夹角=%.1f° | 末端: X=%.1f Y=%.1f Z=%.1f\r\n",
+                   (float)loop_count * dt_s,
+                   q_cmd[0], q_cmd[1], q_cmd[2],
+                   q_cmd[1], q_cmd[2], arm_angle_inner,
+                   current_x, current_y, current_z);
+        }
 
         if (st == 1) {
+            // 计算最终末端位置
+            float final_x, final_y, final_z;
+            forward_kinematics_default(q_cmd[0], q_cmd[1], q_cmd[2], 0, 
+                                      &final_x, &final_y, &final_z);
+            float final_angle_diff = fabsf(q_cmd[2] - q_cmd[1]);
+            float final_arm_angle = 180.0f - final_angle_diff;
+            
+            printf("\r\n========== 运动完成 ==========\r\n");
+            printf("最终角度: Th0=%.1f°, Th1=%.1f°, Th2=%.1f°\r\n", q_cmd[0], q_cmd[1], q_cmd[2]);
+            printf("大小臂夹角: %.1f°\r\n", final_arm_angle);
+            printf("末端位置: X=%.1f, Y=%.1f, Z=%.1f\r\n", final_x, final_y, final_z);
+            printf("总用时: %.2f秒\r\n", (float)loop_count * dt_s);
+            printf("=============================\r\n");
             break;
         }
         if (st < 0) {
@@ -404,5 +453,97 @@ int Motion_MoveToXYZ_RuckigSmooth(float x, float y, float z, float pitch, float 
     current_joint_2 = qT[2];
     motion_stream_active = 0;
 
+    // motion.c 中，Ruckig运动完成后
+    float verify_x, verify_y, verify_z;
+    forward_kinematics_default(qT[0], qT[1], qT[2], 0, &verify_x, &verify_y, &verify_z);
+    LOG_I("Motion", "Target: (%.1f, %.1f, %.1f), FK verify: (%.1f, %.1f, %.1f)",
+          x, y, z, verify_x, verify_y, verify_z);
+
+
     return 0;
+}
+
+void Calculate_CameraToArm(float cam_x, float cam_y, float cam_z,
+                           float* arm_x, float* arm_y, float* arm_z) {
+    if (!arm_x || !arm_y || !arm_z) return;
+
+    // 相机坐标系定义（无倾角时）：
+    // 相机X轴：水平向右 → 机械臂-X
+    // 相机Y轴：垂直向下 → 机械臂-Z
+    // 相机Z轴：水平向前 → 机械臂-Y
+    //
+    // 相机安装时绕自身X轴向下倾斜21.12度
+    // 旋转矩阵（绕X轴顺时针旋转θ=21.12°）：
+    // | cam_x' |   | 1      0         0     |   | cam_x |
+    // | cam_y' | = | 0   cos(θ)   sin(θ)   | × | cam_y |
+    // | cam_z' |   | 0  -sin(θ)   cos(θ)   |   | cam_z |
+    //
+    // 旋转后的相机坐标：
+    float cam_x_rot = cam_x;  // X轴不变
+    float cam_y_rot = cam_y * K_COS_TILT + cam_z * K_SIN_TILT;
+    float cam_z_rot = -cam_y * K_SIN_TILT + cam_z * K_COS_TILT;
+
+    // 映射到机械臂坐标系并转换单位（cm -> mm）：
+    // 机械臂X = -相机X'
+    // 机械臂Y = -相机Z'
+    // 机械臂Z = -相机Y'
+    *arm_x = -cam_x_rot * K_COORD_SCALE_CM_TO_MM + K_ARM_X_OFFSET_MM;
+    *arm_y = -cam_z_rot * K_COORD_SCALE_CM_TO_MM - K_ARM_Y_OFFSET_MM + MOTION_Y_CALIB_BIAS_MM;
+    *arm_z = -cam_y_rot * K_COORD_SCALE_CM_TO_MM - K_ARM_Z_OFFSET_MM - 180.0f;
+}
+
+
+/**
+ * @brief 测试模式：单独控制指定电机到指定角度
+ * @param motor_id 电机ID (1=底座, 2=大臂, 3=小臂)
+ * @param angle 目标角度 (度)
+ * @note 用于验证角度定义和FK正解
+ */
+void Motion_TestSingleMotor(uint8_t motor_id, float angle) {
+    printf("\r\n========== 测试模式：单电机控制 ==========\r\n");
+    printf("电机ID: %d, 目标角度: %.1f°\r\n", motor_id, angle);
+    
+    // 发送角度到指定电机
+    switch(motor_id) {
+        case ID_BASE:
+            set_angle(ID_BASE, angle, 20, 20, 1);
+            current_joint_0 = angle;
+            printf("底座电机(ID=%d) -> %.1f°\r\n", ID_BASE, angle);
+            break;
+            
+        case ID_BIG:
+            set_angle(ID_BIG, angle, 20, 20, 1);
+            current_joint_1 = angle;
+            printf("大臂电机(ID=%d) -> %.1f°\r\n", ID_BIG, angle);
+            break;
+            
+        case ID_SMALL:
+            set_angle(ID_SMALL, -angle, 20, 20, 1);  // 注意：电机3角度取反
+            current_joint_2 = angle;  // 保存的是数学角度（未取反）
+            printf("小臂电机(ID=%d) -> 数学角度%.1f°, 电机角度%.1f°\r\n", 
+                   ID_SMALL, angle, -angle);
+            break;
+            
+        default:
+            printf("[错误] 无效的电机ID: %d\r\n", motor_id);
+            return;
+    }
+    
+    // 等待电机到位
+    osDelay(1000);
+    
+    // 使用FK正解计算当前末端位置
+    float x, y, z;
+    forward_kinematics_default(current_joint_0, current_joint_1, current_joint_2, 0, 
+                              &x, &y, &z);
+    
+    printf("\r\n[FK正解验证]\r\n");
+    printf("当前关节角度: Th0=%.1f°, Th1=%.1f°, Th2=%.1f°\r\n", 
+           current_joint_0, current_joint_1, current_joint_2);
+    printf("计算末端位置: X=%.1fmm, Y=%.1fmm, Z=%.1fmm\r\n", x, y, z);
+    
+    float angle_diff = fabsf(current_joint_2 - current_joint_1);
+    float arm_angle_inner = 180.0f - angle_diff;
+    printf("角度差: %.1f°, 大小臂内角: %.1f°\r\n", angle_diff, arm_angle_inner);
+    printf("========================================\r\n");
 }

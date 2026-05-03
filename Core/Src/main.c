@@ -33,6 +33,7 @@
 #include "dm_imu.h"
 #include "myuart.h"
 #include "pump.h"
+#include "safety.h"
 //#include "imu_can.h"
 /* USER CODE END Includes */
 
@@ -98,6 +99,12 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  
+  /* USER CODE BEGIN GPIO_INIT_SAFETY */
+  // 【安全】GPIO初始化后立即执行安全检查
+  Safety_EarlyInit();
+  /* USER CODE END GPIO_INIT_SAFETY */
+  
   MX_FDCAN1_Init();
   MX_USART1_UART_Init();
   MX_TIM1_Init();

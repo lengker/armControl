@@ -57,6 +57,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
         User/Src/dm_imu.c
         User/Src/ruckig_smooth.cpp
         Core/Src/freertos_hooks.c
+        User/Src/state_machine.c
+        User/Src/safety.c
 )
 
 # Add include paths
