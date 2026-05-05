@@ -93,11 +93,6 @@ static float box_x, box_y, box_z;
 static const float k_pick_approach_offset_z = 80.0f;
 static const float k_pick_lift_offset_z = 140.0f;
 static const float k_pick_pitch_deg = -90.0f;
-static const float k_coord_scale_cm_to_mm = 10.0f;
-static const float k_coord_yz_scale = 0.9328f;
-static const float k_arm_x_offset_mm = 27.46f;
-static const float k_arm_y_offset_mm = 219.42f;
-static const float k_arm_z_offset_mm = 38.01f;
 
 void App_CameraToArmCoordinates(float cam_x, float cam_y, float cam_z,
                                 float* arm_x, float* arm_y, float* arm_z) {
@@ -106,9 +101,9 @@ void App_CameraToArmCoordinates(float cam_x, float cam_y, float cam_z,
     }
 
     // 串口接收的 cam_x/cam_y/cam_z 单位为 cm，这里统一转换为机械臂使用的 mm。
-    *arm_x = cam_x * k_coord_scale_cm_to_mm + k_arm_x_offset_mm;
-    *arm_y = -cam_z * k_coord_scale_cm_to_mm * k_coord_yz_scale + k_arm_y_offset_mm + MOTION_Y_CALIB_BIAS_MM;
-    *arm_z = -cam_y * k_coord_scale_cm_to_mm * k_coord_yz_scale + k_arm_z_offset_mm;
+    *arm_x = cam_x * K_COORD_SCALE_CM_TO_MM + K_ARM_X_OFFSET_MM;
+    *arm_y = -cam_z * K_COORD_SCALE_CM_TO_MM * K_COS_TILT + K_ARM_Y_OFFSET_MM + MOTION_Y_CALIB_BIAS_MM;
+    *arm_z = -cam_y * K_COORD_SCALE_CM_TO_MM * K_COS_TILT + K_ARM_Z_OFFSET_MM;
 }
 
 static void print_current_pos(const char* prefix, float x, float y, float z) {

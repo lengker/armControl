@@ -27,11 +27,6 @@ float camera_raw_z = 0.0f;
 uint8_t pump_state = 0;
 
 float v_x, v_y, v_z;
-static const float k_coord_scale_cm_to_mm = 10.0f;
-static const float k_coord_yz_scale = 0.9328f;
-static const float k_arm_x_offset_mm = 27.46f;
-static const float k_arm_y_offset_mm = 219.42f;
-static const float k_arm_z_offset_mm = 38.01f;
 
 /* ========== 内部辅助函数：大端转float ========== */
 static float bytes_to_float_big_endian(uint8_t* b) {
@@ -66,9 +61,9 @@ static void camera_to_arm_coordinates_local(float cam_x, float cam_y, float cam_
     }
 
     // 串口接收的 cam_x/cam_y/cam_z 单位为 cm，这里统一转换为机械臂使用的 mm。
-    *arm_x = cam_x * k_coord_scale_cm_to_mm + k_arm_x_offset_mm;
-    *arm_y = -cam_z * k_coord_scale_cm_to_mm * k_coord_yz_scale + k_arm_y_offset_mm + MOTION_Y_CALIB_BIAS_MM;
-    *arm_z = -cam_y * k_coord_scale_cm_to_mm * k_coord_yz_scale + k_arm_z_offset_mm;
+    *arm_x = cam_x * K_COORD_SCALE_CM_TO_MM + K_ARM_X_OFFSET_MM;
+    *arm_y = -cam_z * K_COORD_SCALE_CM_TO_MM * K_COS_TILT + K_ARM_Y_OFFSET_MM + MOTION_Y_CALIB_BIAS_MM;
+    *arm_z = -cam_y * K_COORD_SCALE_CM_TO_MM * K_COS_TILT + K_ARM_Z_OFFSET_MM;
 }
 
 /* =========================================================

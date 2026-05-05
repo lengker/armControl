@@ -37,7 +37,6 @@ void forward_kinematics(float theta0, float theta1, float theta2, float theta3,
 void forward_kinematics_default(float theta0, float theta1, float theta2, float theta3,
                                 float *x, float *y, float *z);
 int inverse_kinematics(float x, float y, float z, float target_servo, JointAngles_t *angles);
-int inverse_kinematics2(float x, float y, float z, float target_servo, JointAngles_t *angles);
 /**
  * @brief 对目标角度进行安全限制和路径优化
  * @param target_input 期望到达的角度（用户输入）

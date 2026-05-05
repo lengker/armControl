@@ -32,6 +32,13 @@
 #define MID_POINT_Y_SCALE    1.2f    // y轴外伸比例（1.2=外伸20%）
 #define MID_POINT_Z_OFFSET   60.0f   // z轴抬高高度（单位：mm）
 
+static const float K_COORD_SCALE_CM_TO_MM = 10.0f;
+static const float K_COS_TILT = 0.9328f;
+static const float K_SIN_TILT = 0.3603f;
+static const float K_ARM_X_OFFSET_MM = 27.46f;
+static const float K_ARM_Y_OFFSET_MM = 219.42f;
+static const float K_ARM_Z_OFFSET_MM = 38.01f;
+
 /* ========== Z轴标定补偿 ========== */
 // 如果实物到点普遍“偏低”，就增大这个值（单位 mm）。
 // 例如偏低约 100~120mm，可先设为 110 再微调。

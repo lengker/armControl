@@ -406,3 +406,33 @@ int Motion_MoveToXYZ_RuckigSmooth(float x, float y, float z, float pitch, float 
 
     return 0;
 }
+
+
+void Calculate_CameraToArm(float cam_x, float cam_y, float cam_z,
+                           float* arm_x, float* arm_y, float* arm_z) {
+    if (!arm_x || !arm_y || !arm_z) return;
+
+    // 相机坐标系定义（无倾角时）：
+    // 相机X轴：水平向右 → 机械臂-X
+    // 相机Y轴：垂直向下 → 机械臂-Z
+    // 相机Z轴：水平向前 → 机械臂-Y
+    //
+    // 相机安装时绕自身X轴向下倾斜21.12度
+    // 旋转矩阵（绕X轴顺时针旋转θ=21.12°）：
+    // | cam_x' |   | 1      0         0     |   | cam_x |
+    // | cam_y' | = | 0   cos(θ)   sin(θ)   | × | cam_y |
+    // | cam_z' |   | 0  -sin(θ)   cos(θ)   |   | cam_z |
+    //
+    // 旋转后的相机坐标：
+    float cam_x_rot = cam_x;  // X轴不变
+    float cam_y_rot = cam_y * K_COS_TILT + cam_z * K_SIN_TILT;
+    float cam_z_rot = -cam_y * K_SIN_TILT + cam_z * K_COS_TILT;
+
+    // 映射到机械臂坐标系并转换单位（cm -> mm）：
+    // 机械臂X = -相机X'
+    // 机械臂Y = -相机Z'
+    // 机械臂Z = -相机Y'
+    *arm_x = -cam_x_rot * K_COORD_SCALE_CM_TO_MM + K_ARM_X_OFFSET_MM;
+    *arm_y = -cam_z_rot * K_COORD_SCALE_CM_TO_MM - K_ARM_Y_OFFSET_MM + MOTION_Y_CALIB_BIAS_MM;
+    *arm_z = -cam_y_rot * K_COORD_SCALE_CM_TO_MM - K_ARM_Z_OFFSET_MM - 180.0f;
+}
